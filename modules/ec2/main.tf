@@ -135,7 +135,7 @@ resource "aws_security_group" "adminsg" {
     to_port     = 22
   }
   ingress {
-    cidr_blocks = ["10.11.11./22"]
+    cidr_blocks = ["10.11.11.0/22"]
     description = "VPN CIDR range-2"
     from_port   = 22
     protocol    = "tcp"

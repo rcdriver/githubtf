@@ -12,14 +12,18 @@ variables:
   # STATE_BUCKET: "your-terraform-state-bucket-name"
   STATE_BUCKET: $MY_STATE_BUCKET
 
+#before_script:
+#  - terraform --version
+#  - |
+#    terraform init \
+#      -backend-config="bucket=${MY_STATE_BUCKET}" \
+#      -backend-config="region=${AWS_DEFAULT_REGION}" \
+#      -backend-config="key=terraform.tfstate" \
+#      -backend-config="use_lockfile=true"
+
 before_script:
   - terraform --version
-  - |
-    terraform init \
-      -backend-config="bucket=${MY_STATE_BUCKET}" \
-      -backend-config="region=${AWS_DEFAULT_REGION}" \
-      -backend-config="key=terraform.tfstate" \
-      -backend-config="use_lockfile=true"
+  - terraform init -backend-config="bucket=${MY_STATE_BUCKET}" -backend-config="region=${AWS_DEFAULT_REGION}" -backend-config="key=terraform.tfstate" -backend-config="use_lockfile=true"
 
 stages:
   - validate
@@ -43,10 +47,10 @@ plan:
       - planfile
       - readable_planfile.txt
     expire_in: 1 day
-  # This runs on BOTH dev and master
+  # This runs on BOTH dev and main
   rules:
     - if: $CI_COMMIT_BRANCH == "dev"
-    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_COMMIT_BRANCH == "main"
 
 apply:
   stage: apply
@@ -60,9 +64,9 @@ apply:
   artifacts:
     paths:
       - infra_details.txt
-  # This ONLY runs on the master branch
+  # This ONLY runs on the main branch
   rules:
-    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_COMMIT_BRANCH == "main"
   when: manual
 
 destroy:
@@ -70,6 +74,6 @@ destroy:
   script:
     - terraform destroy -auto-approve
   rules:
-    - if: $CI_COMMIT_BRANCH == "master"
+    - if: $CI_COMMIT_BRANCH == "main"
   when: manual
 

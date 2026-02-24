@@ -1,3 +1,4 @@
+/*
 #terraform {
 #  backend "s3" {
 #    bucket = "tfdev-backend"
@@ -16,7 +17,16 @@
 #  }
 #}
 
+#terraform {
+#  backend "s3" {
+#  }
+#}
+*/
+
 terraform {
   backend "s3" {
+    bucket = ""
+    key    = ""
+    region = "ap-south-1"
   }
 }

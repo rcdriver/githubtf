@@ -1,19 +1,24 @@
 ### resource blocks
 
+resource "aws_key_pair" "dev_key" {
+  key_name   = "dev-key"
+  public_key = file("${path.module}/.ssh/id_rsa.pub")
+}
+
 ### 11. EC2 instance resource
 
-resource "aws_instance" "dev1" {
+resource "aws_instance" "dev1app1" {
   ami                    = var.primary_region_ami
   instance_type          = var.dev_instance_type
-  iam_instance_profile   = aws_iam_instance_profile.ec2-ssm-instance-profile.id
-  subnet_id              = var.private_subnet_az1
+  iam_instance_profile   = aws_iam_instance_profile.ec2_ssm_instance_profile.id
+  subnet_id              = var.dev_public_subnet_az1.id
   vpc_security_group_ids = [
     aws_security_group.adminsg.id,
     aws_security_group.appsg.id,
     aws_security_group.efssg.id
   ]
 
-  key_name = var.dev_pem_key
+  key_name = aws_key_pair.dev_key.key_name
 
   user_data_base64 = filebase64("${path.module}/install_ssm.sh")
 
@@ -51,8 +56,8 @@ resource "aws_instance" "dev1" {
 
 ### 12. Instance profile, IAM Role, IAM Policy resource
 # IAM Role for EC2 without using data block
-resource "aws_iam_role" "ec2-ssm-role" {
-  name = "ec2-ssm-role"
+resource "aws_iam_role" "ec2_ssm_role" {
+  name = "ec2_ssm_role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -69,15 +74,15 @@ resource "aws_iam_role" "ec2-ssm-role" {
 }
 
 # Attach Amazon SSM Managed Policy to the role
-resource "aws_iam_role_policy_attachment" "ssm-policy" {
-  role       = aws_iam_role.ec2-ssm-role.name
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.ec2_ssm_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 # IAM Instance Profile
-resource "aws_iam_instance_profile" "ec2-ssm-instance-profile" {
+resource "aws_iam_instance_profile" "ec2_ssm_instance_profile" {
   name = "my-ec2-instance-profile"
-  role = aws_iam_role.ec2-ssm-role.name
+  role = aws_iam_role.ec2_ssm_role.name
 }
 
 ### 13. Security groups resource
@@ -94,7 +99,6 @@ resource "aws_security_group" "adminsg" {
     protocol    = "-1"
     to_port     = 0
   }
-
   ingress {
     cidr_blocks = ["10.12.248.0/22"]
     description = ""
@@ -103,42 +107,42 @@ resource "aws_security_group" "adminsg" {
     to_port     = 22
   }
   ingress {
-    cidr_blocks = ["10.12.248.35/32"]
+    cidr_blocks = ["10.12.248.11/32"]
     description = "Dev Jumphost-1"
     from_port   = 22
     protocol    = "tcp"
     to_port     = 22
   }
   ingress {
-    cidr_blocks = ["10.12.248.35/32"]
+    cidr_blocks = ["10.12.248.11/32"]
     description = "Dev Jumphost-1"
     from_port   = 3389
     protocol    = "tcp"
     to_port     = 3389
   }
   ingress {
-    cidr_blocks = ["10.12.249.141/32"]
+    cidr_blocks = ["10.12.249.11/32"]
     description = "Devops server"
     from_port   = 0
     protocol    = "-1"
     to_port     = 0
   }
   ingress {
-    cidr_blocks = ["10.14.152.0/21"]
-    description = "Germany VPN CIDR range"
+    cidr_blocks = ["10.11.11.0/21"]
+    description = "VPN CIDR range-1"
     from_port   = 22
     protocol    = "tcp"
     to_port     = 22
   }
   ingress {
-    cidr_blocks = ["10.14.184.0/22"]
-    description = "EU VPN CIDR range"
+    cidr_blocks = ["10.11.11./22"]
+    description = "VPN CIDR range-2"
     from_port   = 22
     protocol    = "tcp"
     to_port     = 22
   }
   ingress {
-    cidr_blocks = ["10.19.0.0/18"]
+    cidr_blocks = ["10.11.11.0/18"]
     description = "OnPrem VPN range"
     from_port   = 3389
     protocol    = "tcp"
@@ -219,21 +223,21 @@ resource "aws_security_group" "appsg" {
     to_port     = -1
   }
   ingress {
-    cidr_blocks = ["10.12.248.27/32"]
+    cidr_blocks = ["10.12.248.11/32"]
     description = "Dev1 Creo "
     from_port   = 0
     protocol    = "-1"
     to_port     = 0
   }
   ingress {
-    cidr_blocks = ["10.216.192.6/32"]
+    cidr_blocks = ["10.11.11.11/32"]
     description = "SFTP"
     from_port   = 2222
     protocol    = "tcp"
     to_port     = 2222
   }
   ingress {
-    cidr_blocks = ["10.216.192.6/32"]
+    cidr_blocks = ["10.11.11.11/32"]
     description = "SFTP"
     from_port   = 61616
     protocol    = "tcp"
@@ -299,27 +303,25 @@ resource "aws_security_group" "efssg" {
 }
 
 ### 14. EFS resource
-resource "aws_efs_file_system" "dev-efs" {
+resource "aws_efs_file_system" "dev_efs" {
   region           = "eu-central-1"
   performance_mode = "generalPurpose"
   throughput_mode  = "bursting"
   #  encrypted = true
 
   tags = {
-    Name = "Dev-EFS"
+    Name = "dev_efs"
   }
 }
 
-resource "aws_efs_mount_target" "dev-efs-mt-az1" {
-  file_system_id  = aws_efs_file_system.dev-efs.id
-###  subnet_id       = aws_subnet.Dev-Private-Subnet-AZ1.id
+resource "aws_efs_mount_target" "dev_efs_mt_az1" {
+  file_system_id  = aws_efs_file_system.dev_efs.id
   subnet_id       = var.private_subnet_az1
   security_groups = [aws_security_group.efssg.id]
 }
 
-resource "aws_efs_mount_target" "dev-efs-mt-az2" {
-  file_system_id  = aws_efs_file_system.dev-efs.id
-###  subnet_id       = aws_subnet.Dev-Private-Subnet-AZ2.id
+resource "aws_efs_mount_target" "dev_efs_mt_az2" {
+  file_system_id  = aws_efs_file_system.dev_efs.id
   subnet_id          = var.private_subnet_az2
   security_groups = [aws_security_group.efssg.id]
 }

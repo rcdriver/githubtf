@@ -10,6 +10,14 @@ variable "private_subnet_az2" {
   type = string 
   }
 
+variable "public_subnet_az1" { 
+  type = string 
+  }
+
+variable "public_subnet_az2" { 
+  type = string 
+  }
+
 variable "primary_region_ami" {
   type    = string
   default = "ami-0a6793a25df710b06"

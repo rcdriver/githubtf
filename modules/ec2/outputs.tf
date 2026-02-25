@@ -1,7 +1,7 @@
-output "ec2-instance-id" {
-  value = aws_instance.dev1.id
+output "ec2_public_ip" {
+  value = aws_instance.dev1app1.public_ip
 }
 
-output "ec2-private-ip" {
-  value = aws_instance.dev1.private_ip
+output "ec2_private_ip" {
+  value = aws_instance.dev1app1.private_ip
 }

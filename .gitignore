@@ -45,6 +45,8 @@ terraform.rc
 
 #.ssh directory containing the PEM SSH key:
 .ssh/
+*.pem
+*.pub
 
 # terraform plan and plan output file:
 planfile.tfplan

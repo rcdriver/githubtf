@@ -1,6 +1,8 @@
 ### 1. VPC:
 resource "aws_vpc" "dev_vpc" {
   cidr_block = var.dev_vpc
+  enable_dns_support = true
+  enable_dns_hostnames = true
 
   tags = {
     Name = "Dev-VPC"
@@ -19,7 +21,8 @@ resource "aws_internet_gateway" "dev_igw" {
 ### 3. Public subnet:
 resource "aws_subnet" "dev_public_subnet_az1" {
   vpc_id              = aws_vpc.dev_vpc.id
-  cidr_block          = var.dev_public_subnet_az1
+  cidr_block          = var.dev_public_subnet_az1_cidr
+  map_public_ip_on_launch = true
   availability_zone_id = var.mum_az1
 
   tags = {
@@ -29,7 +32,8 @@ resource "aws_subnet" "dev_public_subnet_az1" {
 
 resource "aws_subnet" "dev_public_subnet_az2" {
   vpc_id              = aws_vpc.dev_vpc.id
-  cidr_block          = var.dev_public_subnet_az2
+  cidr_block          = var.dev_public_subnet_az2_cidr
+  map_public_ip_on_launch = true
   availability_zone_id = var.mum_az2
 
   tags = {
@@ -40,7 +44,7 @@ resource "aws_subnet" "dev_public_subnet_az2" {
 ### 4. Private subnet:
 resource "aws_subnet" "dev_private_subnet_az1" {
   vpc_id              = aws_vpc.dev_vpc.id
-  cidr_block          = var.dev_private_subnet_az1
+  cidr_block          = var.dev_private_subnet_az1_cidr
   availability_zone_id = var.mum_az1
 
   tags = {
@@ -50,7 +54,7 @@ resource "aws_subnet" "dev_private_subnet_az1" {
 
 resource "aws_subnet" "dev_private_subnet_az2" {
   vpc_id              = aws_vpc.dev_vpc.id
-  cidr_block          = var.dev_private_subnet_az2
+  cidr_block          = var.dev_private_subnet_az2_cidr
   availability_zone_id = var.mum_az2
 
   tags = {

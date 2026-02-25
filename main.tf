@@ -9,6 +9,7 @@ module "s3" {
 module "ec2" {
   source = "./modules/ec2"
   vpc_id                = module.vpc.vpc_id
+  dev_key_name          = "dev_pem_key"
 
   dev_ec2_instance_profile_name = module.iam.dev_ec2_instance_profile_name
 

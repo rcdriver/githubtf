@@ -1,9 +1,9 @@
 ### resource blocks
 
-resource "aws_key_pair" "dev_key" {
-  key_name   = "dev-key"
-  public_key = file("${path.module}/.ssh/id_rsa.pub")
-}
+#resource "aws_key_pair" "dev_key" {
+#  key_name   = "dev-key"
+#  public_key = file("${path.module}/.ssh/id_rsa.pub")
+#}
 
 ### 11. EC2 instance resource
 
@@ -26,8 +26,7 @@ resource "aws_instance" "dev1app1" {
     var.dev_efssg_id
     ]
 
-
-  key_name = aws_key_pair.dev_key.key_name
+  key_name = var.dev_key_name
 
   user_data_base64 = filebase64("${path.module}/install_ssm.sh")
 

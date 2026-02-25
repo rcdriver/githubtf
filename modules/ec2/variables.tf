@@ -61,3 +61,7 @@ variable "dev_efssg_id" {
   type = string
 }
 
+variable "dev_key_name" {
+  description = "The name of the pre-existing AWS Key Pair"
+  type = string
+}

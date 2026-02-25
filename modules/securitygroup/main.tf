@@ -1,11 +1,9 @@
 ### 13. Security groups resource
 
 # Admin SG:
-
 resource "aws_security_group" "dev_adminsg" {
   description = "Dev Admin security group"
   name        = "DevAdminSecurityGroup"
-#  vpc_id = module.vpc.dev_vpc_id
   vpc_id = var.vpc_id
 
   egress {
@@ -78,7 +76,6 @@ resource "aws_security_group" "dev_adminsg" {
 resource "aws_security_group" "dev_appsg" {
   description = "Dev Application Security Group"
   name        = "DevAppSecurityGroup"
-#  vpc_id      = module.vpc.dev_vpc_id
   vpc_id = var.vpc_id
 
   egress {
@@ -187,7 +184,6 @@ resource "aws_security_group" "dev_appsg" {
 resource "aws_security_group" "dev_efssg" {
   description = "Dev EFS security group"
   name        = "DevEFSSecurityGroup"
-#  vpc_id      = module.vpc.dev_vpc_id
   vpc_id = var.vpc_id
 
   egress {
@@ -214,3 +210,4 @@ resource "aws_security_group" "dev_efssg" {
     Owner       = "user1@example.com"
   }
 }
+

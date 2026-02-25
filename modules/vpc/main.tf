@@ -104,12 +104,13 @@ resource "aws_nat_gateway" "dev_ngw" {
 resource "aws_route_table" "dev_private_rt" {
   vpc_id = aws_vpc.dev_vpc.id
 
-#  route {
-#    cidr_block     = var.internet_ip
-#    #nat_gateway_id = aws_nat_gateway.dev_ngw.id
-#    nat_gateway_id = ["10.0.0.0/8"]
-#  }
-
+/*
+  route {
+    cidr_block     = var.internet_ip
+    #nat_gateway_id = aws_nat_gateway.dev_ngw.id
+    nat_gateway_id = ["10.0.0.0/8"]
+  }
+*/
   tags = {
     Name = "Dev-Private-RT"
   }
@@ -119,4 +120,5 @@ resource "aws_route_table_association" "privatert_association" {
   subnet_id      = aws_subnet.dev_private_subnet_az1.id
   route_table_id = aws_route_table.dev_private_rt.id
 }
+
 

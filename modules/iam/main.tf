@@ -1,7 +1,3 @@
-### 12. Instance profile, IAM Role, IAM Policy resource
-
-# IAM Role for EC2 without using data block
-
 resource "aws_iam_role" "dev_ec2_ssm_role" {
   name = "dev_ec2_ssm_role"
 

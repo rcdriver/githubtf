@@ -52,3 +52,6 @@ plan_summary.txt
 
 # terraform lock file:
 .terraform.local.hcl
+
+# Mentioning the backend configuration details required locally to run terraform commands. The values mentioned in this file are already present in the gitlab variables.
+backend.tfvars

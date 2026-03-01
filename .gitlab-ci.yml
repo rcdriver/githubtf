@@ -44,20 +44,18 @@ PlanJob:
 ApplyJob:
   stage: apply
   dependencies:
-    - Planjob
+    - PlanJob  # Changed from 'plan' to 'PlanJob'
   script:
     - terraform apply -input=false "planfile"
-    # Captures infrastructure IDs to a readable text file
     - terraform output > infra_details.txt
     - cat infra_details.txt
   artifacts:
     paths:
       - infra_details.txt
-  # This ONLY runs on the main branch
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   when: manual
-
+  
 DestroyJob:
   stage: destroy
   script:

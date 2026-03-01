@@ -1,7 +1,3 @@
-output "ec2_public_ip" {
-  value = aws_instance.dev1app1.public_ip
-}
-
-output "ec2_private_ip" {
-  value = aws_instance.dev1app1.private_ip
+output "dev_instance_ids" {
+  value = { for k, v in aws_instance.dev_app_servers : k => v.id }
 }

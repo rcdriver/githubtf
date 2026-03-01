@@ -8,18 +8,7 @@ variables:
   AWS_ACCESS_KEY_ID: $MY_AWS_ACCESS_KEY_ID
   AWS_SECRET_ACCESS_KEY: $MY_AWS_SECRET_ACCESS_KEY
   AWS_DEFAULT_REGION: "ap-south-1"
-  # Best Practice: Use a variable for your bucket name
-  # STATE_BUCKET: "your-terraform-state-bucket-name"
   STATE_BUCKET: $MY_STATE_BUCKET
-
-#before_script:
-#  - terraform --version
-#  - |
-#    terraform init \
-#      -backend-config="bucket=${MY_STATE_BUCKET}" \
-#      -backend-config="region=${AWS_DEFAULT_REGION}" \
-#      -backend-config="key=terraform.tfstate" \
-#      -backend-config="use_lockfile=true"
 
 before_script:
   - terraform --version
@@ -31,12 +20,12 @@ stages:
   - apply
   - destroy
 
-validate:
+ValidateJob:
   stage: validate
   script:
     - terraform validate
 
-plan:
+PlanJob:
   stage: plan
   script: 
     - terraform plan -out="planfile"
@@ -52,7 +41,7 @@ plan:
     - if: $CI_COMMIT_BRANCH == "dev"
     - if: $CI_COMMIT_BRANCH == "main"
 
-apply:
+ApplyJob:
   stage: apply
   dependencies:
     - plan
@@ -69,7 +58,7 @@ apply:
     - if: $CI_COMMIT_BRANCH == "main"
   when: manual
 
-destroy:
+DestroyJob:
   stage: destroy
   script:
     - terraform destroy -auto-approve

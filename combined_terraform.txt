@@ -1,0 +1,1177 @@
+FILE: ./backend.tf
+terraform {
+  backend "s3" {
+    bucket = ""
+    key    = ""
+    region = "ap-south-1"
+  }
+}
+
+---
+
+FILE: ./backend.tfvars
+bucket = "tfdev-backend"
+region = "ap-south-1"
+key    = "terraform.tfstate"
+###key    = "state/terraform.tfstate"
+
+---
+
+FILE: ./main.tf
+module "vpc" {
+  source = "./modules/vpc"
+}
+
+module "s3" {
+  source = "./modules/s3"
+}
+
+/*
+module "ec2" {
+  source = "./modules/ec2"
+  vpc_id                = module.vpc.vpc_id
+  dev_key_name          = "dev_pem_key"
+  dev_ec2_instance_profile_name = module.iam.dev_ec2_instance_profile_name
+  dev_public_subnet_az1_id = module.vpc.dev_public_subnet_az1_id
+  dev_public_subnet_az2_id = module.vpc.dev_public_subnet_az2_id
+  dev_private_subnet_az1_id = module.vpc.dev_private_subnet_az1_id
+  dev_private_subnet_az2_id = module.vpc.dev_private_subnet_az2_id
+  dev_adminsg_id  = module.securitygroup.dev_adminsg_id
+  dev_appsg_id    = module.securitygroup.dev_appsg_id
+  dev_efssg_id    = module.securitygroup.dev_efssg_id
+}
+*/
+
+module "ec2" {
+  source = "./module/ec2"
+  primary_region_ami              = "ami-051a31ab2f4d498f5"
+  dev_instance_type               = "t3.micro"
+  dev_iam_instance_profile_name   = module.iam.dev_ec2_instance_profile_name
+  dev_key_name                    = "dev_key_name"
+
+  security_group_ids = [
+    aws_security_group.admin.id,
+    aws_security_group.app.id
+  ]
+
+}
+
+module "iam" {
+  source = "./modules/iam"
+}
+
+module "efs" {
+  source = "./modules/efs"
+  dev_public_subnet_az1_id = module.vpc.dev_public_subnet_az1_id
+  dev_public_subnet_az2_id = module.vpc.dev_public_subnet_az2_id
+  dev_private_subnet_az1_id = module.vpc.dev_private_subnet_az1_id
+  dev_private_subnet_az2_id = module.vpc.dev_private_subnet_az2_id
+  dev_efssg_id = module.securitygroup.dev_efssg_id
+}
+
+module "securitygroup" {
+  source = "./modules/securitygroup"
+  vpc_id = module.vpc.vpc_id
+}
+
+#module "sns" {
+#  source = "./module/sns"
+#}
+
+#module "cloudwatch" {
+#  source = "./module/cloudwatch"
+#  instance_ids            = module.ec2.instance_ids
+#  warning_sns_topic_arn   = aws_sns_topic.dev_warning_alarm.arn
+#  critical_sns_topic_arn  = aws_sns_topic.dev_actual_alarm.arn
+#}
+
+
+---
+
+FILE: ./modules/cloudwatch/main.tf
+locals {
+  warning_threshold = 70
+  critical_threshold = 80
+}
+
+resource "aws_cloudwatch_metric_alarm" "ec2_cpu_warning_alarm" {
+  for_each = var.instance_ids
+
+  alarm_name          = "${each.key}-CPUUtilization-Warning"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300" # 5 minutes
+  statistic           = "Average"
+  threshold           = local.warning_threshold
+  alarm_description   = "CPU warning alarm for ${each.key}"
+  
+  # Reference the SNS topics you created earlier
+  alarm_actions       = [ aws_sns_topic.dev_warning_alarm.arn ]
+  ok_actions          = [ aws_sns_topic.dev_warning_alarm.arn ]
+
+  dimensions = {
+    InstanceId = each.value
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "ec2_cpu_actual_alarm" {
+  for_each = var.instance_ids
+
+  alarm_name          = "${each.key}-CPUUtilization-Actual"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300" # 5 minutes
+  statistic           = "Average"
+  threshold           = local.critical_threshold
+  alarm_description   = "CPU actual alarm for ${each.key}"
+  
+  # Reference the SNS topics you created earlier
+  alarm_actions       = [ aws_sns_topic.dev_actual_alarm.arn ]
+  ok_actions          = [ aws_sns_topic.dev_actual_alarm.arn ]
+
+  dimensions = {
+    InstanceId = each.value
+  }
+}
+
+
+---
+
+FILE: ./modules/cloudwatch/outputs.tf
+output "warning_alarm_arns" {
+  value = {
+    for k, v in aws_cloudwatch_metric_alarm.cpu_warning :
+    k => v.arn
+  }
+}
+
+output "critical_alarm_arns" {
+  value = {
+    for k, v in aws_cloudwatch_metric_alarm.cpu_critical :
+    k => v.arn
+  }
+}
+
+
+---
+
+FILE: ./modules/cloudwatch/variables.tf
+variable "instance_ids" {
+  description = "Map of EC2 instance names to IDs"
+  type        = map(string)
+}
+
+variable "warning_sns_topic_arn" {
+  type = string
+}
+
+variable "actual_sns_topic_arn" {
+  type = string
+}
+
+
+---
+
+FILE: ./modules/ec2/main.tf
+locals {
+  common_tags = {
+    AWSBackup    = "Daily"
+    AWSBackupEnv = "Dev"
+    Application  = "WC"
+    Costcenter   = "123"
+    Environment  = "Dev"
+    Owner        = "abc@example.com"
+    ec2_start    = "Sun_10_30pm"
+    ec2_stop     = "Sat_4am"
+  }
+}
+
+/*
+resource "aws_instance" "dev1app1" {
+  ami                    = var.primary_region_ami
+  instance_type          = var.dev_instance_type
+  iam_instance_profile = var.dev_ec2_instance_profile_name
+  subnet_id = var.dev_public_subnet_az1_id
+  vpc_security_group_ids = [
+    var.dev_adminsg_id,
+    var.dev_appsg_id,
+    var.dev_efssg_id
+    ]
+  key_name = var.dev_key_name
+  user_data_base64 = filebase64("${path.module}/install_ssm.sh")
+
+  dynamic "root_block_device" {
+    for_each = var.root_volume_settings
+    content {
+      delete_on_termination = true
+      encrypted             = true
+      volume_size           = root_block_device.value.size
+      volume_type           = root_block_device.value.type
+      iops                  = root_block_device.value.iops
+      throughput            = root_block_device.value.throughput
+    }
+  }
+
+  dynamic "ebs_block_device" {
+    for_each = var.ebs_volume_settings
+    content {
+      delete_on_termination = false
+      device_name           = ebs_block_device.value.name
+      encrypted             = true
+      volume_size           = ebs_block_device.value.size
+      volume_type           = ebs_block_device.value.type
+      iops                  = ebs_block_device.value.iops
+      throughput            = ebs_block_device.value.throughput
+    }
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "Dev1AppServer"
+    }
+  )
+
+}
+
+
+resource "aws_instance" "dev2app1" {
+  ami                    = var.primary_region_ami
+  instance_type          = var.dev_instance_type
+  iam_instance_profile = var.dev_ec2_instance_profile_name
+  subnet_id = var.dev_public_subnet_az2_id
+  vpc_security_group_ids = [
+    var.dev_adminsg_id,
+    var.dev_appsg_id,
+    var.dev_efssg_id
+    ]
+  key_name = var.dev_key_name
+  user_data_base64 = filebase64("${path.module}/install_ssm.sh")
+  
+  dynamic "root_block_device" {
+    for_each = var.root_volume_settings
+    content {
+      delete_on_termination = true
+      encrypted             = true
+      volume_size           = root_block_device.value.size
+      volume_type           = root_block_device.value.type
+      iops                  = root_block_device.value.iops
+      throughput            = root_block_device.value.throughput
+    }
+  }
+  
+  dynamic "ebs_block_device" {
+    for_each = var.ebs_volume_settings
+    content {
+      delete_on_termination = false
+      device_name           = ebs_block_device.value.name
+      encrypted             = true
+      volume_size           = ebs_block_device.value.size
+      volume_type           = ebs_block_device.value.type
+      iops                  = ebs_block_device.value.iops
+      throughput            = ebs_block_device.value.throughput
+    }
+  }
+  
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "Dev2AppServer"
+    }
+  )
+}
+*/
+
+
+
+resource "aws_instance" "dev_app_servers" {
+  for_each = var.dev_instances
+
+  ami                    = var.primary_region_ami
+  instance_type          = var.dev_instance_type
+  iam_instance_profile   = var.dev_iam_instance_profile_name
+  subnet_id              = each.value.subnet_id
+  key_name               = var.dev_key_name
+  vpc_security_group_ids = var.dev_security_group_ids
+
+  user_data_base64 = filebase64("${path.module}/install_ssm.sh")
+
+  dynamic "dev_root_block_device" {
+    for_each = var.dev_root_volume_settings
+    content {
+      delete_on_termination = true
+      encrypted             = true
+      volume_size           = dev_root_block_device.value.size
+      volume_type           = dev_root_block_device.value.type
+      iops                  = dev_root_block_device.value.iops
+      throughput            = dev_root_block_device.value.throughput
+    }
+  }
+
+  dynamic "dev_ebs_block_device" {
+    for_each = var.dev_ebs_volume_settings
+    content {
+      delete_on_termination = false
+      device_name           = dev_ebs_block_device.value.name
+      encrypted             = true
+      volume_size           = dev_ebs_block_device.value.size
+      volume_type           = dev_ebs_block_device.value.type
+      iops                  = dev_ebs_block_device.value.iops
+      throughput            = dev_ebs_block_device.value.throughput
+    }
+  }
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "Dev1AppServer"
+    }
+  )
+
+}
+
+
+---
+
+FILE: ./modules/ec2/old_variables.tf
+variable "vpc_id" { 
+  type = string 
+  }
+
+
+variable "dev_public_subnet_az1_id" {
+  type = string
+}
+
+variable "dev_public_subnet_az2_id" {
+  type = string
+}
+
+variable "dev_private_subnet_az1_id" {
+  type = string
+}
+
+variable "dev_private_subnet_az2_id" {
+  type = string
+}
+
+
+variable "dev_adminsg_id" {
+  type = string
+}
+
+variable "dev_appsg_id" {
+  type = string
+}
+
+variable "dev_efssg_id" {
+  type = string
+}
+
+
+
+variable "root_volume_settings" {
+  type = list(object({
+    size       = number
+    type       = string
+    iops       = number
+    throughput = number
+  }))
+  default = [{
+    size       = 15
+    type       = "gp3"
+    iops       = 3000
+    throughput = 125
+  }]
+}
+
+variable "ebs_volume_settings" {
+  type = list(object({
+    name       = string
+    size       = number
+    type       = string
+    iops       = number
+    throughput = number
+  }))
+  default = [{
+    name       = "/dev/sdb"
+    size       = 2
+    type       = "gp3"
+    iops       = 3000
+    throughput = 125
+  }]
+}
+
+---
+
+FILE: ./modules/ec2/outputs.tf
+output "dev_instance_ids" {
+  value = {
+    for k, v in aws_instance.app_servers :
+    k => v.id
+  }
+}
+
+output "dev_instance_public_ips" {
+  value = {
+    for k, v in aws_instance.app_servers :
+    k => v.public_ip
+  }
+}
+
+output "dev_instance_private_ips" {
+  value = {
+    for k, v in aws_instance.app_servers :
+    k => v.private_ip
+  }
+}
+
+output "dev_instance_network_details" {
+  value = {
+    for k, v in aws_instance.app_servers :
+    k => {
+      public_ip  = v.public_ip
+      private_ip = v.private_ip
+    }
+  }
+}
+
+---
+
+FILE: ./modules/ec2/variables.tf
+variable "primary_region_ami" {
+  type = string
+}
+
+variable "dev_instance_type" {
+  type    = string
+}
+
+variable "dev_iam_instance_profile_name" {
+  type = string
+}
+
+variable "dev_key_name" {
+  description = "The name of the pre-existing AWS Key Pair in AWS portal"
+  type = string
+}
+
+
+variable "dev_security_group_ids" {
+  type = list(string)
+}
+
+variable "dev_instances" {
+  description = "Map of EC2 instances"
+  type = map(object({
+    subnet_id = string
+    name      = string
+  }))
+}
+
+variable "dev_root_volume_settings" {
+  type = list(object({
+    size       = number
+    type       = string
+    iops       = number
+    throughput = number
+  }))
+}
+
+variable "dev_ebs_volume_settings" {
+  type = list(object({
+    name       = string
+    size       = number
+    type       = string
+    iops       = number
+    throughput = number
+  }))
+}
+
+---
+
+FILE: ./modules/efs/main.tf
+resource "aws_efs_file_system" "dev_efs1" {
+  performance_mode = "generalPurpose"
+  throughput_mode  = "bursting"
+  #  encrypted = true
+
+  tags = {
+    Name = "Dev-efs1"
+  }
+}
+
+resource "aws_efs_mount_target" "dev_efs1_mt_az1" {
+  file_system_id  = aws_efs_file_system.dev_efs1.id
+  subnet_id = var.dev_public_subnet_az1_id
+  security_groups = [var.dev_efssg_id]
+}
+
+resource "aws_efs_mount_target" "dev_efs1_mt_az2" {
+  file_system_id  = aws_efs_file_system.dev_efs1.id
+  subnet_id = var.dev_public_subnet_az2_id
+  security_groups = [var.dev_efssg_id]
+}
+
+---
+
+FILE: ./modules/efs/outputs.tf
+output dev_efs1_id {
+  value = aws_efs_file_system.dev_efs1.id
+}
+
+output dev_efs1_mt_az1_id {
+  value = aws_efs_mount_target.dev_efs1_mt_az1.id
+}
+
+output dev_efs1_mt_az2_id {
+  value = aws_efs_mount_target.dev_efs1_mt_az2.id
+}
+
+
+---
+
+FILE: ./modules/efs/variables.tf
+variable "dev_public_subnet_az1_id" {
+  description = "ID of the public subnet in AZ1"
+  type        = string
+}
+
+variable "dev_public_subnet_az2_id" {
+  description = "ID of the public subnet in AZ2"
+  type        = string
+}
+
+variable "dev_private_subnet_az1_id" {
+  description = "ID of the private subnet in AZ1"
+  type        = string
+}
+
+variable "dev_private_subnet_az2_id" {
+  description = "ID of the private subnet in AZ2"
+  type        = string
+}
+
+variable "dev_efssg_id" {
+  description = "ID of the Dev EFS Security Group"
+  type        = string
+}
+
+
+---
+
+FILE: ./modules/iam/main.tf
+resource "aws_iam_role" "dev_ec2_ssm_role" {
+  name = "dev_ec2_ssm_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# Attach Amazon SSM Managed Policy to the role
+resource "aws_iam_role_policy_attachment" "dev_ssm_policy" {
+  role       = aws_iam_role.dev_ec2_ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# IAM Instance Profile
+resource "aws_iam_instance_profile" "dev_ec2_ssm_instance_profile" {
+  name = "dev_ec2_ssm_instance_profile"
+  role = aws_iam_role.dev_ec2_ssm_role.name
+}
+
+---
+
+FILE: ./modules/iam/outputs.tf
+output "dev_ec2_instance_profile_name" {
+    value = aws_iam_instance_profile.dev_ec2_ssm_instance_profile.name
+}
+
+
+---
+
+FILE: ./modules/s3/main.tf
+#resource "aws_s3_bucket" "dev1-s3bucket1" {
+#  bucket = "dev1-s3bucket1abc1351"
+#  tags = {
+#    Name        = "dev1-s3bucket1abc1351"
+#    Environment = "Dev"
+#  }
+#
+#  timeouts {
+#    create = "3m"
+#    update = "3m"
+#    delete = "3m"
+#  }
+#
+#}
+
+
+---
+
+FILE: ./modules/s3/outputs.tf
+#output "s3-bucket-name" {
+#  value = aws_s3_bucket.dev1-s3bucket1.id
+#}
+
+---
+
+FILE: ./modules/s3/variables.tf
+#variable "aws_region" {
+#  type = string
+#}
+
+---
+
+FILE: ./modules/securitygroup/main.tf
+### 13. Security groups resource
+
+# Admin SG:
+resource "aws_security_group" "dev_adminsg" {
+  description = "Dev Admin security group"
+  name        = "DevAdminSecurityGroup"
+  vpc_id = var.vpc_id
+
+  egress {
+    cidr_blocks = ["0.0.0.0/0"]
+    description = ""
+    from_port   = 0
+    protocol    = "-1"
+    to_port     = 0
+  }
+  ingress {
+    cidr_blocks = ["10.12.248.0/22"]
+    description = ""
+    from_port   = 22
+    protocol    = "tcp"
+    to_port     = 22
+  }
+  ingress {
+    cidr_blocks = ["10.12.248.11/32"]
+    description = "Dev Jumphost-1"
+    from_port   = 22
+    protocol    = "tcp"
+    to_port     = 22
+  }
+  ingress {
+    cidr_blocks = ["10.12.248.11/32"]
+    description = "Dev Jumphost-1"
+    from_port   = 3389
+    protocol    = "tcp"
+    to_port     = 3389
+  }
+  ingress {
+    cidr_blocks = ["10.12.249.11/32"]
+    description = "Devops server"
+    from_port   = 0
+    protocol    = "-1"
+    to_port     = 0
+  }
+  ingress {
+    cidr_blocks = ["10.11.8.0/21"]
+    description = "VPN CIDR range-1"
+    from_port   = 22
+    protocol    = "tcp"
+    to_port     = 22
+  }
+  ingress {
+    cidr_blocks = ["10.11.8.0/22"]
+    description = "VPN CIDR range-2"
+    from_port   = 22
+    protocol    = "tcp"
+    to_port     = 22
+  }
+  ingress {
+    cidr_blocks = ["10.11.0.0/18"]
+    description = "OnPrem VPN range"
+    from_port   = 3389
+    protocol    = "tcp"
+    to_port     = 3389
+  }
+
+  tags = {
+    Application = "WC"
+    Costcenter  = "123"
+    Environment = "Dev"
+    Name        = "Dev-AdminSG"
+    Owner       = "user1@example.com"
+  }
+}
+
+# App SG:
+resource "aws_security_group" "dev_appsg" {
+  description = "Dev Application Security Group"
+  name        = "DevAppSecurityGroup"
+  vpc_id = var.vpc_id
+
+  egress {
+    cidr_blocks = ["0.0.0.0/0"]
+    description = ""
+    from_port   = 0
+    protocol    = "-1"
+    to_port     = 0
+  }
+
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = ""
+    from_port   = 137
+    protocol    = "tcp"
+    to_port     = 139
+  }
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = ""
+    from_port   = 2049
+    protocol    = "tcp"
+    to_port     = 2049
+  }
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = ""
+    from_port   = 20
+    protocol    = "tcp"
+    to_port     = 21
+  }
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = ""
+    from_port   = 389
+    protocol    = "tcp"
+    to_port     = 389
+  }
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = ""
+    from_port   = 445
+    protocol    = "tcp"
+    to_port     = 445
+  }
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = "CAD Worker"
+    from_port   = 5600
+    protocol    = "tcp"
+    to_port     = 5600
+  }
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = "ICMP"
+    from_port   = -1
+    protocol    = "icmp"
+    to_port     = -1
+  }
+  ingress {
+    cidr_blocks = ["10.12.248.11/32"]
+    description = "Dev1 Creo "
+    from_port   = 0
+    protocol    = "-1"
+    to_port     = 0
+  }
+  ingress {
+    cidr_blocks = ["10.11.11.11/32"]
+    description = "SFTP"
+    from_port   = 2222
+    protocol    = "tcp"
+    to_port     = 2222
+  }
+  ingress {
+    cidr_blocks = ["10.11.11.11/32"]
+    description = "SFTP"
+    from_port   = 61616
+    protocol    = "tcp"
+    to_port     = 61616
+  }
+  ingress {
+    cidr_blocks     = ["0.0.0.0/0"]
+    description     = ""
+    from_port       = 443
+    protocol        = "tcp"
+    to_port         = 443
+  }
+  ingress {
+    cidr_blocks     = ["0.0.0.0/0"]
+    description     = "common EFS SG"
+    from_port       = 0
+    protocol        = "-1"
+    to_port         = 0
+  }
+
+  tags = {
+    Application = "WC"
+    Costcenter  = "123"
+    Environment = "Dev"
+    Name        = "Dev1-AppSG"
+    Owner       = "user1@example.com"
+  }
+}
+
+# EFS SG:
+resource "aws_security_group" "dev_efssg" {
+  description = "Dev EFS security group"
+  name        = "DevEFSSecurityGroup"
+  vpc_id = var.vpc_id
+
+  egress {
+    cidr_blocks = ["0.0.0.0/0"]
+    description = ""
+    from_port   = 0
+    protocol    = "-1"
+    to_port     = 0
+  }
+
+  ingress {
+    cidr_blocks = ["10.0.0.0/8"]
+    description = ""
+    from_port   = 2049
+    protocol    = "tcp"
+    to_port     = 2049
+  }
+
+  tags = {
+    Application = "WC"
+    Costcenter  = "123"
+    Environment = "Dev"
+    Name        = "Dev1-EFSSG"
+    Owner       = "user1@example.com"
+  }
+}
+
+
+---
+
+FILE: ./modules/securitygroup/outputs.tf
+output "dev_adminsg_id" {
+  description = "Dev Admin SG ID"
+  value       = aws_security_group.dev_adminsg.id
+}
+
+output "dev_appsg_id" {
+  description = "Dev App SG ID"
+  value       = aws_security_group.dev_appsg.id
+}
+
+output "dev_efssg_id" {
+  description = "Dev EFS SG ID"
+  value       = aws_security_group.dev_efssg.id
+}
+
+
+---
+
+FILE: ./modules/securitygroup/variables.tf
+variable "vpc_id" {
+  description = "ID of the Dev VPC"
+  type        = string
+}
+
+
+---
+
+FILE: ./modules/sns/main.tf
+resource "aws_sns_topic" "dev_warning_alarm" {
+  name = "cloudteam-warning-alarm-topic"
+}
+
+resource "aws_sns_topic" "dev_actual_alarm" {
+  name = "cloudteam-actual-alarm-topic"
+}
+
+
+resource "aws_sns_topic_subscription" "dev_warning_alarm_subscription" {
+  for_each  = toset(var.team_emails)
+  topic_arn = aws_sns_topic.dev_warning_alarm.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
+resource "aws_sns_topic_subscription" "dev_actual_alarm_subscription" {
+  for_each  = toset(var.team_emails)
+  topic_arn = aws_sns_topic.dev_actual_alarm.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
+---
+
+FILE: ./modules/sns/outputs.tf
+
+---
+
+FILE: ./modules/sns/variables.tf
+variable "team_emails" {
+  type    = list(string)
+  default = [
+    "user1@example.com",
+    "user2@example.com",
+    "user3@example.com",
+    "user4@example.com",
+    "user5@example.com",
+    "user6@example.com",
+    "user7@example.com",
+    "user8@example.com",
+    "user9@example.com",
+    "user10@example.com"
+  ]
+}
+
+---
+
+FILE: ./modules/vpc/main.tf
+### 1. VPC:
+resource "aws_vpc" "dev_vpc" {
+  cidr_block = var.dev_vpc
+  enable_dns_support = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "Dev-VPC"
+  }
+}
+
+### 2. IGW:
+resource "aws_internet_gateway" "dev_igw" {
+  vpc_id = aws_vpc.dev_vpc.id
+
+  tags = {
+    Name = "Dev-IGW"
+  }
+}
+
+### 3. Public subnet:
+resource "aws_subnet" "dev_public_subnet_az1" {
+  vpc_id              = aws_vpc.dev_vpc.id
+  cidr_block          = var.dev_public_subnet_az1_cidr
+  map_public_ip_on_launch = true
+  availability_zone_id = var.mum_az1
+
+  tags = {
+    Name = "Dev-Public-Subnet-AZ1"
+  }
+}
+
+resource "aws_subnet" "dev_public_subnet_az2" {
+  vpc_id              = aws_vpc.dev_vpc.id
+  cidr_block          = var.dev_public_subnet_az2_cidr
+  map_public_ip_on_launch = true
+  availability_zone_id = var.mum_az2
+
+  tags = {
+    Name = "Dev-Public-Subnet-AZ2"
+  }
+}
+
+### 4. Private subnet:
+resource "aws_subnet" "dev_private_subnet_az1" {
+  vpc_id              = aws_vpc.dev_vpc.id
+  cidr_block          = var.dev_private_subnet_az1_cidr
+  availability_zone_id = var.mum_az1
+
+  tags = {
+    Name = "Dev-Private-Subnet-AZ1"
+  }
+}
+
+resource "aws_subnet" "dev_private_subnet_az2" {
+  vpc_id              = aws_vpc.dev_vpc.id
+  cidr_block          = var.dev_private_subnet_az2_cidr
+  availability_zone_id = var.mum_az2
+
+  tags = {
+    Name = "Dev-Private-Subnet-AZ2"
+  }
+}
+
+### 5. Public RT
+resource "aws_route_table" "dev_public_rt" {
+  vpc_id = aws_vpc.dev_vpc.id
+
+  route {
+    cidr_block = var.internet_ip
+    gateway_id = aws_internet_gateway.dev_igw.id
+  }
+
+  tags = {
+    Name = "Dev-Public-RT"
+  }
+}
+
+resource "aws_route_table_association" "publicrt_assoiation" {
+  subnet_id      = aws_subnet.dev_public_subnet_az1.id
+  route_table_id = aws_route_table.dev_public_rt.id
+}
+
+/*
+### 6. EIP
+# Commented it due to cost issues
+resource "aws_eip" "dev_nat_eip" {
+
+}
+
+### 7. NAT Gateway
+# Commented it due to cost issues
+resource "aws_nat_gateway" "dev_ngw" {
+  allocation_id = aws_eip.dev_nat_eip.id
+  subnet_id     = aws_subnet.dev_public_subnet_az1.id
+
+  tags = {
+    Environment = "dev-ngw"
+  }
+}
+*/
+
+### 8. Private RT
+resource "aws_route_table" "dev_private_rt" {
+  vpc_id = aws_vpc.dev_vpc.id
+
+/*
+  route {
+    cidr_block     = var.internet_ip
+    #nat_gateway_id = aws_nat_gateway.dev_ngw.id
+    nat_gateway_id = ["10.0.0.0/8"]
+  }
+*/
+  tags = {
+    Name = "Dev-Private-RT"
+  }
+}
+
+resource "aws_route_table_association" "privatert_association" {
+  subnet_id      = aws_subnet.dev_private_subnet_az1.id
+  route_table_id = aws_route_table.dev_private_rt.id
+}
+
+
+
+---
+
+FILE: ./modules/vpc/outputs.tf
+output "vpc_id" {
+  value = aws_vpc.dev_vpc.id
+}
+
+output "dev_public_subnet_az1_id" {
+  value = aws_subnet.dev_public_subnet_az1.id
+}
+
+output "dev_public_subnet_az2_id" {
+  value = aws_subnet.dev_public_subnet_az2.id
+}
+
+output "dev_private_subnet_az1_id" {
+  value = aws_subnet.dev_private_subnet_az1.id
+}
+
+output "dev_private_subnet_az2_id" {
+  value = aws_subnet.dev_private_subnet_az2.id
+}
+
+---
+
+FILE: ./modules/vpc/variables.tf
+variable "dev_vpc" { 
+    type = string 
+    default = "10.12.248.0/24" 
+    }
+
+variable "mum_az1" { 
+    type = string 
+    default = "aps1-az1" 
+    }
+
+variable "mum_az2" { 
+    type = string 
+    default = "aps1-az2" 
+    }
+
+variable "dev_public_subnet_az1_cidr" { 
+    type = string 
+    default = "10.12.248.128/28" 
+    }
+
+variable "dev_public_subnet_az2_cidr" { 
+    type = string 
+    default = "10.12.248.192/28" 
+    }
+
+variable "dev_private_subnet_az1_cidr" { 
+    type = string 
+    default = "10.12.248.0/26" 
+    }
+
+variable "dev_private_subnet_az2_cidr" { 
+    type = string 
+    default = "10.12.248.64/26" 
+    }
+
+variable "internet_ip" { 
+    type = string 
+    default = "0.0.0.0/0" 
+    }
+
+---
+
+FILE: ./outputs.tf
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+
+output "dev_public_subnet_az1_id" {
+  value = module.vpc.dev_public_subnet_az1_id
+} 
+
+output "dev_public_subnet_az2_id" {
+  value = module.vpc.dev_public_subnet_az2_id
+} 
+
+output "dev_private_subnet_az1_id" {
+  value = module.vpc.dev_private_subnet_az1_id
+} 
+
+output "dev_private_subnet_az2_id" {
+  value = module.vpc.dev_private_subnet_az2_id
+} 
+
+---
+
+FILE: ./provider.tf
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+      version = "6.32.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+---
+
+FILE: ./terraform.tfvars
+aws_region = "ap-south-1"
+
+---
+
+FILE: ./variables.tf
+variable "aws_region" {
+    description = "Primary region - Mumbai"
+    type = string
+}
+---
+

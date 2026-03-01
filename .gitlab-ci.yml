@@ -44,7 +44,7 @@ PlanJob:
 ApplyJob:
   stage: apply
   dependencies:
-    - planjob
+    - Planjob
   script:
     - terraform apply -input=false "planfile"
     # Captures infrastructure IDs to a readable text file
